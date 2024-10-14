@@ -1,0 +1,5 @@
+*.o
+.vscode
+ircserv
+compile_commands.json
+.cache

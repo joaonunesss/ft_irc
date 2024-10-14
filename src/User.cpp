@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   User.cpp                                           :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: cacarval <cacarval@student.42.fr>          +#+  +:+       +#+        */
+/*   By: jmarinho <jmarinho@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2024/10/03 13:33:09 by cacarval          #+#    #+#             */
-/*   Updated: 2024/10/07 15:45:41 by cacarval         ###   ########.fr       */
+/*   Updated: 2024/10/14 16:45:37 by jmarinho         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,36 +14,44 @@
 
 User::User() : _nick("Default")
 {
-	/*std::cout << "User default constructor" << std::endl;*/
+	std::cout << "User default constructor" << std::endl;
 }
 
-User::User(std::string nick, const std::string &hostname)
+User::User(const std::string &hostname)
 {
-	/*std::cout << "User Constructor" << std::endl;*/
-	this->_nick = nick;
+	std::cout << "User Constructor" << std::endl;
 	this->_hostname = hostname;
 }
 
-
 User::~User()
 {
-	/*std::cout << "User Destructor" << std::endl;*/
+	std::cout << "User Destructor" << std::endl;
 }
 
-std::string User::get_nick() const
+/* User getters */
+
+const std::string &User::get_nick() const
 {
 	return(this->_nick);
 }
 
+const std::string &User::get_buffer() const
+{
+	return (this->_buffer);
+}
+
+const std::string &User::get_username() const
+{
+	return(this->_username);
+}
+
+/* -------------------------------------------------- */
+
+/* User setters */
+
 void User::set_nick(const std::string &nick)
 {
 	this->_nick = nick;
-}
-
-
-std::string User::get_username() const
-{
-	return(this->_username);
 }
 
 void User::set_username(const std::string &username)
@@ -56,16 +64,15 @@ void User::set_hostname(const std::string &hostname)
 	this->_hostname = hostname;
 }
 
+std::string User::get_hostname()
+{
+	return(this->_hostname);
+}
+
 void User::set_buffer(const std::string &buffer)
 {
 	this->_buffer = buffer;
 }
-
-const std::string &User::get_buffer() const
-{
-	return (this->_buffer);
-}
-
 
 std::string User::get_name(const std::string &string, int what)
 {
@@ -79,6 +86,11 @@ std::string User::get_name(const std::string &string, int what)
 		int pos = string.find("USER ") + 5;
 		return(string.substr(pos, (string ).find_first_of("0", pos) - pos - 1));
 	}
+	if (string.find("PASS ") != std::string::npos && what == 3)
+	{
+		int pos = string.find("PASS ") + 5;
+		return(string.substr(pos, (string ).find_first_of("0", pos) - pos - 1));
+	}
 	return("ERROR");
 }
 
@@ -86,14 +98,20 @@ bool User::get_info()
 {
 	std::string nick = get_name(this->get_buffer(), 1);
 	std::string username = get_name(this->get_buffer(), 2);
-	if ((nick != "ERROR" && nick.find("USER ") == std::string::npos)&& username != "ERROR")
+	std::string pass = get_name(this->get_buffer(), 3);
+	
+	if ((nick != "ERROR" && nick.find("USER ") == std::string::npos) && username != "ERROR"
+		&& pass != "\0")
 	{
-		this->set_nick(nick);
-		this->set_username(username);
+		this->_nick = nick;
+		this->_username = username;
+		_password = pass;
+		
 		return (1);
 	}
 	return (0);
 }
+
 
 void User::prepare_buffer(const std::string &command)
 {
