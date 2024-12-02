@@ -1,5 +1,6 @@
-*.o
+obj/
 .vscode
 ircserv
 compile_commands.json
+clang_format
 .cache

@@ -1,28 +1,35 @@
 /* ************************************************************************** */
 /*                                                                            */
 /*                                                        :::      ::::::::   */
-/*   Cap.cpp                                            :+:      :+:    :+:   */
+/*   UserCMD.cpp                                        :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
 /*   By: rumachad <rumachad@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2024/10/10 12:00:14 by rumachad          #+#    #+#             */
-/*   Updated: 2024/10/10 12:01:34by rumachad         ###   ########.fr       */
+/*   Created: 2024/10/28 15:58:46 by rumachad          #+#    #+#             */
+/*   Updated: 2024/10/28 16:07:29by rumachad         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "Commands.hpp"
 
-Cap::Cap(Server &server) : ACommand(server)
+UserCMD::UserCMD(Server &server) : ACommand(server, true, 4)
 {
-	std::cout << "Cap Server Constructor" << std::endl;
+/* 	std::cout << "User constructor" << std::endl; */
 }
 
-Cap::~Cap()
+UserCMD::~UserCMD()
 {
-	std::cout << "Cap Destructor" << std::endl;
+/* 	std::cout << "UserCMD destructor" << std::endl; */
 }
 
-int Cap::run()
+int UserCMD::run()
 {
-	return (1);
+	if (!_user->get_auth())
+	{
+		_server.send_numeric(*_user, ERR_ALREADYREGISTERED, "* :You may not reregister");
+		return (0);
+	}
+	_user->set_username(_args[0]);
+	_user->set_realname(_args[3]);
+	return (0);
 }

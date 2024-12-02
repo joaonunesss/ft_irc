@@ -6,7 +6,7 @@
 /*   By: rumachad <rumachad@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2024/10/01 12:23:16 by rumachad          #+#    #+#             */
-/*   Updated: 2024/10/02 16:55:87by rumachad         ###   ########.fr       */
+/*   Updated: 2024/11/21 14:45:5 by rumachad         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -15,140 +15,101 @@
 bool Server::should_end = false;
 
 /* Constructors/Destructors */
-Server::Server(int port, std::string pass) : active_fd(1)
+Server::Server(const int port, const std::string &password) : active_fd(1), _password(password)
 {
 	/*std::cout << "Server port Constructor" << std::endl;*/
 	std::memset(&this->_address, 0, sizeof(this->_address));
-	this->_address.sin_family = AF_INET;
-	this->_address.sin_port = htons(port);
-	this->_password = pass;
-	this->_commands["JOIN"] = new Join(*this); //JOIN <channel>
-	this->_commands["WHO"] = new Who(*this);   //who
-	this->_commands["MODE"] = new Mode(*this); //MODE <channel> +/- <mode>  || MODE <channel> +/- <mode> <nickname>
-	this->_commands["NICK"] = new Nick(*this); //NICK <new_name>
-	this->_commands["QUIT"] = new Quit(*this); //QUIT :<msg>
-	this->_commands["PRIVMSG"] = new PrivMsg(*this); // PRIVMSG <name> <msg> || PRIVMSG <channel> <msg>
-	this->_commands["KICK"] = new Kick(*this); //KICK <channel> <nickname> :<reason> || KICK <channel> <nickname>
-	//whois whois <nick>
-	//part PART <channel> :<msg>
-	//topic TOPIC <channel> || TOPIC <channel> <new_topic>
-	//invite INVITE <nick> <channel>
-	//pass? PASS <password>
-	//ping? PING <>
-	//pong? PONG <>
+	_address.sin_family = AF_INET;
+	_address.sin_port = htons(port);
+	_commands["JOIN"] = new Join(*this);			//JOIN <channel>
+	_commands["WHO"] = new Who(*this);			//WHO <mask>
+	_commands["MODE"] = new Mode(*this);			//MODE <channel> +/- <mode>  || MODE <channel> +/- <mode> <nickname>
+	_commands["NICK"] = new Nick(*this);			//NICK <new_name>
+	_commands["QUIT"] = new Quit(*this);			//QUIT :<msg>
+	_commands["PRIVMSG"] = new PrivMsg(*this);	//PRIVMSG <name> <msg> || PRIVMSG <channel> <msg>
+	_commands["KICK"] = new Kick(*this);			//KICK <channel> <nickname> :<reason> || KICK <channel> <nickname>
+	_commands["TOPIC"] = new Topic(*this);		//TOPIC <channel> || TOPIC <channel> <new_topic>
+	_commands["PART"] = new Part(*this);
+	_commands["LIST"] = new List(*this);
+	_commands["INVITE"] = new Invite(*this);		//INVITE <nick> <channel>
+	_commands["WHOIS"] = new WhoIs(*this);
+	_commands["PASS"] = new Pass(*this);
+	_commands["PING"] = new Pong(*this);
+	_commands["USER"] = new UserCMD(*this);
+	_commands["MOTD"] = new Motd(*this);
+
+	_server_creation_time = std::time(0);
+	get_hostname();
 }
 
 Server::~Server()
 {
-	for (std::map<std::string, ACommand *>::iterator it = this->_commands.begin(); it != this->_commands.end(); ++it)
+	for (std::map<std::string, ACommand *>::iterator it = _commands.begin(); it != _commands.end(); ++it)
 		delete it->second;
-	/*std::cout << "Server Destructor" << std::endl;	*/
+	for (std::vector<pollfd>::iterator it = _fds.begin(); it != _fds.end(); it++)
+		close(it->fd);
+	_fds.clear();
+	/* std::cout << "Server Destructor" << std::endl;	*/
 }
 
 /* -------------------------------------------- */
+
+void Server::get_hostname()
+{
+	// Gets the hostname from /etc/hostname
+	std::ifstream hostnameFile("/etc/hostname");
+	if (!hostnameFile)
+	{
+		std::cerr << "Error opening /etc/hostname" << std::endl;
+		_hostname = "localhost";
+		return;
+	}
+	std::string hostname;
+	std::getline(hostnameFile, hostname);
+	_hostname = hostname;
+}
+
+const std::string &Server::get_host() const
+{
+	return(this->_hostname);
+}
 
 int Server::create_server()
 {
 	int on = 1;
 	pollfd sock;
 
+					/* CREATE A SOCKET */
 	sock.fd = socket(this->_address.sin_family, SOCK_STREAM, 0);
 	if (sock.fd == -1)
 		print_error("Socket Error");
 	if (setsockopt(sock.fd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on)))
 		print_error("setsockopt Error");
+
+					/* BIND SOCKET TO PORT */
 	if (bind(sock.fd, (struct sockaddr *)&this->_address, 
 				sizeof(this->_address)) != 0)
 		print_error("Bind Error");
+
+					/* LISTEN FOR CONNECTIONS */
 	if (listen(sock.fd, 5) == -1)
 		print_error("Listen Error");
+
 	sock.events = POLLIN;
-	this->fds.push_back(sock);
+	_fds.push_back(sock);
+	std::cout << GREEN << "	////////////////////" << RESET << std::endl;
+	std::cout << GREEN << "	Server is Now Online" << RESET << std::endl;
+	std::cout << GREEN << "	////////////////////" << RESET << std::endl;
 	return (EXIT_SUCCESS);
-}
-
-void Server::close_all_fds()
-{
-	for (it_fd it = this->fds.begin(); it != this->fds.end(); it++)
-		close(it->fd);
-	this->fds.erase(this->fds.begin(), this->fds.end());
-}
-
-pollfd Server::connect_client()
-{
-	pollfd		client;
-	sockaddr_in	client_info;
-	socklen_t	len = sizeof(client_info);
-
-	client.fd = accept(this->fds[0].fd, (struct sockaddr *)&client_info, &len);
-	if (client.fd == -1)
-		print_error("Accept Error");
-	client.events = POLLIN;
-	this->_clients[client.fd] = User(inet_ntoa(client_info.sin_addr));
-	this->active_fd++;
-	std::cout << "New client " << this->active_fd << " connected" << std::endl;
-	return (client);
-}
-
-void Server::receive_msg(it_user user)
-{
-	int msg_bytes;
-	char buffer[1024] = {0};
-	msg_bytes = recv(user->first, buffer, sizeof(buffer), 0);
-
-	if (msg_bytes == -1)
-		print_error("recv Error");
-
-	user->second.set_buffer(buffer);
-	std::cout << buffer;	//printa msg do client para o server
-}
-
-void Server::send_msg(it_user msg_sender, int i)
-{
-	for (it_user user = this->_clients.begin(); user != this->_clients.end(); user++)
-	{
-		if (user != msg_sender && i == 0)
-			send(user->first, msg_sender->second.ge                                                          t_buffer().c_str(),
-				msg_sender->second.get_buffer().length(), 0);
-		else if (i == 1)
-			send(user->first, msg_sender->second.get_buffer().c_str(),
-				msg_sender->second.get_buffer().length(), 0);
-		else if (i == 2)
-		{
-			User user;
-			std::string msg01 = std::string(":") + user.get_hostname() + " " + RPL_WELCOME + " " + user.get_nick() + " :Welcome to the " + SERVER_NAME + " Internet Relay Network, " + user.get_nick() + "!\r\n";
-			std::string msg02 = std::string(":") + user.get_hostname() + " " + RPL_YOURHOST + " " + user.get_nick() + " :Your host is " + _serverHostname + ", running version v0.1\r\n";
-			std::string msg03 = std::string(":") + user.get_hostname() + " " + RPL_CREATED + " " + user.get_nick() + " :This server was created " + std::asctime(std::localtime(&_serverCreationTime));
-			std::string msg04 = std::string(":") + user.get_hostname() + " " + RPL_MYINFO + " " + user.get_nick() + " " + _serverHostname + " v0.1 o iklt\r\n";
-
-			send(user->first, msg01.c_str(), msg01.length(), 0); //user->first deveria ser socket
-			send(user->first, msg02.c_str(), msg02.length(), 0);
-			send(user->first, msg03.c_str(), msg03.length(), 0);
-			send(user->first, msg04.c_str(), msg04.length(), 0);
-		}
-	}
-}
-
-void Server::msg_user(const int receiver_fd, User &msg_sender)
-{
-	send(receiver_fd, msg_sender.get_buffer().c_str(), msg_sender.get_buffer().length(), 0);
-}
-
-bool	Server::check_password(User &user)
-{
-	if (_password == user.getPassword())
-		return true;
-	return false;
 }
 
 int Server::main_loop()
 {
-	int ret;
+	int ret = 0;
 
 	while (!should_end)
 	{
-		std::vector<pollfd> tmp;
-		ret = poll(this->fds.data(), this->active_fd, -1);
+		ret = poll(this->_fds.data(), this->active_fd, -1);
 		if (ret == -1)
 		{
 			if (errno == EINTR)
@@ -156,89 +117,335 @@ int Server::main_loop()
 			std::perror("Poll Error");
 			break;
 		}
-		if (ret == 0)
-		{
-			std::cout << "Pool timeout" << std::endl;
-			return (EXIT_FAILURE);
-		}
-		for (it_fd it = this->fds.begin(); it != this->fds.end(); it++)
-		{
-			if (it->revents == 0)
-				continue;
-			if (it->revents != POLLIN)
-				print_error("Error revents");
-			if (it->fd == this->fds[0].fd)
-			{
-				tmp.push_back(this->connect_client());
-				it = this->fds.begin();
-			}
-			else
-			{
-				it_user user = advance_map(this->_clients, it->fd);
-				this->receive_msg(user);
-				if (user->second.get_info())
-					break;
-				if (!check_password(user)) //Rui vai mudar it_user para Class User
-					return EXIT_FAILURE;
-				welcome_message(user); //Rui vai mudar it_user para Class User
-				try
-				{
-					// Parser::parser(user->second.get_buffer());
-					if (this->handle_commands(user))
-						break;
-				}
-				catch (std::exception &e)
-				{
-					std::cerr << "Command Not Found" << std::endl;
-				}
-			}
-		}
-		this->fds.insert(this->fds.end(), tmp.begin(), tmp.end());
+		fds_loop();
 	}
 	return (0);
 }
 
-int Server::handle_commands(it_user &user)
+int Server::fds_loop()
 {
-	const std::string msg = user->second.get_buffer();
-	const std::string command_name = msg.substr(0, msg.find_first_of(" "));
-	std::cout << "CMD: " << command_name << std::endl;
-	const size_t command_name_len = command_name.length() + 1;
+	int tmp = this->active_fd;
 
-	if (command_name.compare("CAP") == 0 || command_name.compare(".") == 0
-		|| command_name.compare(" .") == 0)
-		return (0);
-	ACommand * command = this->_commands.at(command_name);
-
-	command->set_args(msg.substr(command_name_len, msg.length() - command_name_len));
-	command->set_user(user);
-	if (command->run())
-		return (1);
+	for (int i = 0; i < tmp; i++)
+	{
+		if (_fds[i].revents == NO_EVENTS)
+			continue;
+		if (!(_fds[i].revents & POLLIN) && !(_fds[i].revents & POLLOUT))
+		{
+			std::cerr << "Error in Revents" << std::endl;
+			continue;
+		}
+		if (_fds[i].fd == _fds[0].fd)
+			connect_client();
+		else
+		{
+			User &user = _clients.at(this->_fds[i].fd);
+			if (_fds[i].revents & POLLIN)
+			{
+				if (receive_msg(user))
+					continue;
+				_fds[i].events = POLLOUT;
+			}
+			else if (_fds[i].revents & POLLOUT)
+			{
+				if (handle_commands(user))
+					return (0);
+				user.erase_buffer();
+				if (user.get_auth() && user.is_registered())
+					welcome_burst(user);
+				_fds[i].events = POLLIN;
+			}
+		}
+	}
 	return (0);
 }
 
-it_user Server::get_user(const std::string &nick)
+int Server::connect_client()
 {
-	it_user it;
+	pollfd		client;
+	sockaddr_in	client_info;
+	socklen_t	len = sizeof(client_info);
+
+	client.fd = accept(_fds[0].fd, (struct sockaddr *)&client_info, &len);
+	if (client.fd == -1)
+	{
+		std::perror("Accept Function Error");
+		return (1);
+	}
+	client.events = POLLIN;
+	client.revents = NO_EVENTS;
+	_clients[client.fd] = User(client.fd, inet_ntoa(client_info.sin_addr), "*");
+	active_fd++;
+	_fds.push_back(client);
+
+	std::cout << "New Client: " << active_fd << " connected" << std::endl;
+	return EXIT_SUCCESS;
+}
+
+void Server::welcome_burst(User &user)
+{
+	std::string time = std::asctime(std::localtime(&_server_creation_time));
+
+	time[time.find('\n')] = '\0';
+	send_numeric(user, RPL_WELCOME, ":Welcome to the " SERVER_NAME " IRC Network, %s!",
+					user.get_nick().c_str());
+	send_numeric(user, RPL_YOURHOST, ":Your host is %s running version v1.0",
+					user.get_hostname().c_str());
+	send_numeric(user, RPL_CREATED, ":This server was created %s", time.c_str());
+	send_numeric(user, RPL_MYINFO, "localhost v1.0 o iklt");
+	send_numeric(user, RPL_ISUPPORT, "CHANMODES=" AVAIL_MODES);
 	
-	for (it = this->_clients.begin(); it != this->_clients.end()
-		&& it->second.get_nick().compare(nick) != 0; it++)
-		;
-	return (it);
+	std::ifstream file(MOTD_FILE);
+	std::string line;
+
+	if (!file.is_open())
+		send_numeric(user, ERR_NOMOTD, ":MOTD File is missing");
+	else
+	{
+		send_numeric(user, RPL_MOTDSTART, ":- %s Message of the day -", _hostname.c_str());
+		while (std::getline(file, line))
+			send_numeric(user, RPL_MOTD, ":- %s", line.c_str());
+		send_numeric(user, RPL_ENDOFMOTD, ":End of /MOTD");
+		file.close();
+	}
+	user.set_auth(false);
 }
 
-void Server::disconnect_user(it_user &user)
+int Server::receive_msg(User &user)
 {
-	close(user->first);
+	int msg_bytes;
+	char buffer[1024] = {0};
+	msg_bytes = recv(user.get_fd(), buffer, sizeof(buffer), 0);
+	
+	if (msg_bytes <= 0)
+	{
+		user.set_buffer("QUIT :Remote Host closed the connection\r\n");
+		return (0);
+	}
+	user.set_buffer(buffer);
+	if (user.get_buffer().find("\n") == std::string::npos)
+		return (1);
+	print_recv(user);
+	return(0);
+}
+
+/* ----------------- Send Functions --------------------*/
+void Server::send_numeric(const User &user, const std::string &numeric,
+							const std::string msg, ...)
+{
+	std::string rpl = ":" + user.get_hostname() + " " + numeric + " " + user.get_nick() + " ";
+
+	std::va_list params;
+	va_start(params, msg);
+	for (std::string::const_iterator it = msg.begin(); it != msg.end(); it++)
+	{
+		if (*it == '%')
+		{
+			rpl.append(va_arg(params, const char *));
+			it++;
+		}
+		else
+			rpl += *it;
+	}
+	rpl.append("\r\n");
+	print(rpl);
+	send(user.get_fd(), rpl.c_str(), rpl.length(), 0);
+}
+
+void Server::send_msg_all_users(User &msg_sender)
+{
+	print(msg_sender.get_buffer());
+	for (std::map<int, User>::iterator user = this->_clients.begin(); user != this->_clients.end(); user++)
+	{
+		send(user->first, msg_sender.get_buffer().c_str(),
+			msg_sender.get_buffer().length(), 0);
+	}
+}
+
+void Server::send_msg_to_channel(const Channel &ch, const User &msg_sender, const int flag)
+{
+	const std::map<User *, int> &ch_users = ch.get_users();
+
+	print(msg_sender.get_buffer());
+	for (std::map<User *, int>::const_iterator it = ch_users.begin(); it != ch_users.end(); it++) 
+	{
+		if (flag == CHOTHER && msg_sender.get_fd() != it->first->get_fd())
+			send(it->first->get_fd(), msg_sender.get_buffer().c_str(),
+				msg_sender.get_buffer().length(), 0);
+		else if (flag == CHSELF)
+			send(it->first->get_fd(), msg_sender.get_buffer().c_str(),
+				msg_sender.get_buffer().length(), 0);
+	}
+}
+
+void Server::send_msg_one_user(const int receiver_fd, User &msg_sender)
+{
+	print(msg_sender.get_buffer());
+	send(receiver_fd, msg_sender.get_buffer().c_str(), msg_sender.get_buffer().length(), 0);
+}
+/* -------------------------------------------------- */
+
+
+/* ------------------------- Command Functions ------------------------------- */
+ACommand *Server::get_command(const std::string &command_name)
+{
+	std::map<std::string, ACommand *>::iterator it = _commands.find(command_name);
+	
+	if (it != _commands.end())
+		return (it->second);
+	return (NULL);
+}
+
+int Server::handle_commands(User &user)
+{
+	std::deque<std::string> lines = split_block(user.get_buffer());
+	std::string command_name;
+	std::deque<std::string> split;
+
+	for(std::deque<std::string>::iterator it = lines.begin(); it != lines.end(); it++)
+	{
+		split = split_line(*it);
+		if (split.empty())
+			continue;
+		command_name = split[0];
+		split.pop_front();
+		if (call_command(command_name, user, split))
+			continue;
+	}
+	if (command_name == "QUIT")
+		return(1);
+	return(0);
+}
+
+int Server::call_command(std::string &command_name, User &user, std::deque<std::string> &params)
+{
+	std::transform(command_name.begin(), command_name.end(), command_name.begin(), ::toupper);
+	ACommand * command = get_command(command_name);
+
+	if (command == NULL)
+	{
+		send_numeric(user, ERR_UNKOWNCOMMAND, "%s :Unknown Command", command_name.c_str());
+		return (1);
+	}
+	
+	if (user.get_auth() && !command->_usable_pre_reg)
+	{
+		send_numeric(user, ERR_NOTREGISTERED, ":You have not registered");
+		return (1);
+	}
+	if (params.size() < command->_min_params)
+	{
+		send_numeric(user, ERR_NEEDMOREPARAMS, "%s :Not enough parameters", command_name.c_str());
+		return (1);
+	}
+	command->set_user(&user);
+	command->set_args(params);
+	command->run();
+	return (0);
+}
+/* ------------------------------------------------------------------ */
+
+
+/* ------------------------------ Channel Functions -----------------------*/
+const std::string Server::channels_user_joined(User &user)
+{
+	std::string user_joined_ch;
+
+	for (std::map<std::string, Channel>::iterator it = _channel_list.begin(); it != _channel_list.end(); it++)
+	{
+		if (it->second.is_user_on_ch(user) == 1)
+			user_joined_ch.append(it->first + " ");
+	}
+	return (user_joined_ch);
+}
+
+Channel *Server::check_channel(const std::string &ch_name)
+{
+	std::map<std::string, Channel>::iterator it = this->_channel_list.find(ch_name);
+	if (it == this->_channel_list.end())
+		return (NULL);
+	return (&it->second);
+}
+
+Channel *Server::create_channel(const std::string &ch_name)
+{
+	this->_channel_list[ch_name] = Channel(ch_name);
+	return (&this->_channel_list[ch_name]);
+}
+
+void Server::delete_channel(Channel &channel)
+{
+	_channel_list.erase(channel.get_name());
+}
+/* -------------------------------------------------------------------------- */
+
+const std::string user_from_channel(const std::map<User *, int> &channel_users)
+{
+	std::string users;
+	for (std::map<User *, int>::const_iterator it = channel_users.begin(); it != channel_users.end(); it++)
+	{
+		if (it->second == OP)
+			users.append('@' + it->first->get_nick() + ' ');
+		else
+		 	users.append(it->first->get_nick() + " ");
+	}
+	return (users);
+}
+
+void Server::disconnect_user(User &user)
+{
+	const int fd = user.get_fd();
+	for(std::map<std::string, Channel>::iterator it = _channel_list.begin(); it != _channel_list.end();)
+	{
+		if (it->second.is_user_on_ch(user))
+		{
+			it->second.delete_user(user);
+			if (it->second.get_users().size() == 0)
+			{
+				std::map<std::string, Channel>::iterator temp = it;
+				it++;
+				_channel_list.erase(temp);
+				continue ;
+			}
+		}
+		it++;
+	}
+	this->_fds.erase(find_fd(this->_fds, fd));
+	this->_clients.erase(this->_clients.find(fd));
 	this->active_fd--;
-	this->_clients.erase(user);
-	this->fds.erase(find_fd(this->fds, user->first));
+	close(fd);
+	std::cout << "Client Disconnected" << std::endl;
 }
 
-it_fd find_fd(std::vector<pollfd> &vec, const int fd)
+User *Server::get_user(const std::string &nick)
 {
-	it_fd it;
-	for (it = vec.begin(); it->fd != fd; it++)
-		;
-	return (it);
+	for (std::map<int, User>::iterator it = this->_clients.begin(); it != this->_clients.end(); it++)
+	{
+		if (it->second.get_nick().compare(nick) == 0)
+			return (&it->second);
+	}
+	return (NULL);
+}
+
+bool Server::check_nickname(std::string &nickname)
+{
+	for (std::map<int, User>::iterator it = _clients.begin(); it != _clients.end(); it++)
+		if (it->second.get_nick() == nickname)
+			return(1);
+	return(0);
+}
+
+const std::string &Server::get_password() const
+{
+	return (_password);
+}
+
+const std::map<std::string, Channel> &Server::get_channels() const
+{
+	return (_channel_list);
+}
+
+std::map<int, User>& Server::get_all_clients()
+{
+	return _clients;
 }

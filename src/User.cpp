@@ -3,32 +3,36 @@
 /*                                                        :::      ::::::::   */
 /*   User.cpp                                           :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: jmarinho <jmarinho@student.42.fr>          +#+  +:+       +#+        */
+/*   By: rumachad <rumachad@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2024/10/03 13:33:09 by cacarval          #+#    #+#             */
-/*   Updated: 2024/10/14 16:45:37 by jmarinho         ###   ########.fr       */
+/*   Updated: 2024/11/27 11:37:50 by rumachad         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "User.hpp"
 
-User::User() : _nick("Default")
+User::User() : _fd(0), _nick("Default"), _auth(true)
 {
-	std::cout << "User default constructor" << std::endl;
+	/* std::cout << "User default constructor" << std::endl; */
 }
 
-User::User(const std::string &hostname)
+User::User(const int &fd, const std::string &hostname, const std::string &nick) : _fd(fd), _nick(nick), _hostname(hostname), _auth(true)
 {
-	std::cout << "User Constructor" << std::endl;
-	this->_hostname = hostname;
+/* 	std::cout << "User Constructor" << std::endl; */
 }
 
 User::~User()
 {
-	std::cout << "User Destructor" << std::endl;
+	/* std::cout << "User Destructor" << std::endl; */
 }
 
 /* User getters */
+
+const int &User::get_fd() const
+{
+	return (_fd);
+}
 
 const std::string &User::get_nick() const
 {
@@ -43,6 +47,31 @@ const std::string &User::get_buffer() const
 const std::string &User::get_username() const
 {
 	return(this->_username);
+}
+
+const std::string &User::get_hostname() const
+{
+	return(this->_hostname);
+}
+
+const std::string &User::get_password() const
+{
+	return(this->_password);
+}
+
+const std::string &User::get_realname() const
+{
+	return (_realname);
+}
+
+bool User::get_auth() const
+{
+	return(_auth);
+}
+
+bool User::get_disconnect_user() const
+{
+	return(this->_disconnect_user);
 }
 
 /* -------------------------------------------------- */
@@ -64,58 +93,86 @@ void User::set_hostname(const std::string &hostname)
 	this->_hostname = hostname;
 }
 
-std::string User::get_hostname()
-{
-	return(this->_hostname);
-}
-
 void User::set_buffer(const std::string &buffer)
 {
-	this->_buffer = buffer;
+	_buffer += buffer;
 }
 
-std::string User::get_name(const std::string &string, int what)
+void User::set_password(const std::string &password)
 {
-	if (string.find("NICK ") != std::string::npos && what == 1)
-	{
-		int pos = string.find("NICK ") + 5;
-		return(string.substr(pos, (string ).find_first_of("\n", pos) - pos - 1));
-	}
-	if (string.find("USER ") != std::string::npos && what == 2)
-	{
-		int pos = string.find("USER ") + 5;
-		return(string.substr(pos, (string ).find_first_of("0", pos) - pos - 1));
-	}
-	if (string.find("PASS ") != std::string::npos && what == 3)
-	{
-		int pos = string.find("PASS ") + 5;
-		return(string.substr(pos, (string ).find_first_of("0", pos) - pos - 1));
-	}
-	return("ERROR");
+	_password = password;
 }
 
-bool User::get_info()
+void User::set_realname(const std::string &realname)
 {
-	std::string nick = get_name(this->get_buffer(), 1);
-	std::string username = get_name(this->get_buffer(), 2);
-	std::string pass = get_name(this->get_buffer(), 3);
+	_realname = realname;
+}
+
+void User::set_auth(const bool &status)
+{
 	
-	if ((nick != "ERROR" && nick.find("USER ") == std::string::npos) && username != "ERROR"
-		&& pass != "\0")
-	{
-		this->_nick = nick;
-		this->_username = username;
-		_password = pass;
-		
-		return (1);
+	_auth = status;
+}
+
+void User::set_disconnect_user(const bool &disconnect_user)
+{
+	_disconnect_user = disconnect_user;
+}
+
+/* -------------------------------------- */
+
+void User::erase_buffer()
+{
+	_buffer.clear();
+}
+
+void User::make_msg(const std::string &command, const std::deque<std::string> &params)
+{
+	_buffer = ":" + _nick + "!" + _username + "@" + _hostname + " " + command;
+	for (std::deque<std::string>::const_iterator it = params.begin(); it != params.end(); it++) {
+		_buffer.append(' ' + *it);
 	}
-	return (0);
+	_buffer.append("\r\n");
 }
 
 
-void User::prepare_buffer(const std::string &command)
+const std::vector<std::string> &User::get_invited_channels() const
 {
-	std::ostringstream oss;
-	oss << ":" << this->_nick << "!" << this->_username << "@" << this->_hostname << " " << command;
-	this->_buffer = oss.str();
+	return(_invited_channels);
+}
+
+std::ostream &operator<<(std::ostream &out, const User &user)
+{
+	out << YELLOW << "Nick: " << user.get_nick() << std::endl
+		<< "User: " << user.get_username() << std::endl
+		<< "PASS: " << user.get_password() << std::endl
+		<< "RealName: " << user.get_realname() << RESET << std::endl;
+	return (out);
+}
+
+bool User::is_registered() const
+{
+	if (!_nick.compare("*") || _realname.empty() || _username.empty() || _password.empty())
+		return (false);
+	return (true);
+}
+
+void User::elim_from_invited(const std::string &channel_name)
+{
+	std::vector<std::string>::iterator it = std::find(_invited_channels.begin(), _invited_channels.end(), channel_name);
+	if (it != _invited_channels.end())
+		_invited_channels.erase(it);
+}
+
+bool User::check_invitation(const std::string &channel_name) const
+{
+	if (std::find(_invited_channels.begin(), _invited_channels.end(), channel_name)
+			!= _invited_channels.end())
+		return (true);
+	return (false);
+}
+
+void User::add_invitation(const std::string &channel_name)
+{
+	_invited_channels.push_back(channel_name);
 }
